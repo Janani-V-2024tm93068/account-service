@@ -1,2 +1,1 @@
-# account-service
-Handles account creation &amp; balance
+"# Account Service" 
