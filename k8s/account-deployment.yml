@@ -1,0 +1,157 @@
+# Secret for Account DB
+apiVersion: v1
+kind: Secret
+metadata:
+  name: account-db-secret
+type: Opaque
+data:
+  POSTGRES_USER: YWNjb3VudHVzZXI=        # accountuser
+  POSTGRES_PASSWORD: YWNjb3VudHBhc3M=    # accountpass
+  POSTGRES_DB: YWNjb3VudGRi             # accountdb
+
+---
+# PVC for Account DB
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: account-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# Account DB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: account-db
+  template:
+    metadata:
+      labels:
+        app: account-db
+    spec:
+      containers:
+        - name: account-db
+          image: postgres:15
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_DB
+          volumeMounts:
+            - name: account-db-storage
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - "$(POSTGRES_USER)"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: account-db-storage
+          persistentVolumeClaim:
+            claimName: account-db-pvc
+
+---
+# Account DB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-db
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+  selector:
+    app: account-db
+
+---
+# Account Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: account-service
+  template:
+    metadata:
+      labels:
+        app: account-service
+    spec:
+      containers:
+        - name: account-service
+          image: account-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8082
+          env:
+            - name: DB_HOST
+              value: account-db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: account-db-secret
+                  key: POSTGRES_DB
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+# Account Service ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8082
+  selector:
+    app: account-service
